@@ -294,6 +294,12 @@ textarea{resize:vertical;min-height:70px;font-family:var(--mono);font-size:13px}
       <div class="row" style="margin-top:8px"><button class="sbtn primary" id="addNames" style="flex:1">＋ Hinzufügen</button></div>
     </section>
     <section class="sb">
+      <h3>// WEBUNTIS-IMPORT</h3>
+      <button class="sbtn" id="untisBtn" style="width:100%">🏫 Schülerliste aus WebUntis importieren</button>
+      <input type="file" id="untisFile" accept=".csv,.txt,text/csv,text/plain" class="hidden">
+      <div class="hint">CSV-Export der Schülerliste aus WebUntis. Übernommen werden nur Langname, Vorname und Klasse. Klassen werden automatisch angelegt, vorhandene Namen werden übersprungen.</div>
+    </section>
+    <section class="sb">
       <h3>// OPTIONEN</h3>
       <label class="check"><input type="checkbox" id="noRepeat"> <span>Keine Wiederholung, bis alle einmal dran waren</span></label>
       <div class="btns">
@@ -523,7 +529,7 @@ function drawWheel(){
       const a0 = wheelRot + i * seg;
       ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, rIn, a0, a0 + seg); ctx.closePath();
       ctx.fillStyle = segColor(i, n); ctx.fill();
-      ctx.lineWidth = Math.max(2, R * 0.008); ctx.strokeStyle = '#0b0f1f'; ctx.stroke();
+      ctx.lineWidth = Math.max(2, R * 0.008); ctx.strokeStyle = '#0b0f1f'; if(n > 1) ctx.stroke();
       ctx.save(); ctx.rotate(a0 + seg / 2);
       ctx.fillStyle = '#0b0f1f'; ctx.font = `800 ${fs}px Rubik, sans-serif`; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
       let name = wheelItems[i].name; const maxW = rIn * 0.66;
@@ -925,6 +931,72 @@ $('#importFile').onchange = async e => {
     state = s; save(); setMode(state.settings.mode); refresh(); say('Backup erfolgreich geladen 📂');
   }catch(err){ alert('Diese Datei ist kein gültiges Backup.'); }
   e.target.value = '';
+};
+
+// WebUntis import (CSV: Langname, Vorname, Klasse, …)
+function decodeText(buf){
+  const b = new Uint8Array(buf);
+  if(b[0] === 0xFF && b[1] === 0xFE) return new TextDecoder('utf-16le').decode(buf);
+  if(b[0] === 0xFE && b[1] === 0xFF) return new TextDecoder('utf-16be').decode(buf);
+  try{ return new TextDecoder('utf-8', {fatal:true}).decode(buf); }
+  catch(e){ return new TextDecoder('windows-1252').decode(buf); }
+}
+function splitLine(line, sep){
+  const out = []; let cur = '', q = false;
+  for(let i = 0; i < line.length; i++){
+    const ch = line[i];
+    if(q){ if(ch === '"'){ if(line[i+1] === '"'){ cur += '"'; i++; } else q = false; } else cur += ch; }
+    else if(ch === '"') q = true;
+    else if(ch === sep){ out.push(cur); cur = ''; }
+    else cur += ch;
+  }
+  out.push(cur);
+  return out.map(s => s.trim());
+}
+function parseUntis(text){
+  const lines = text.replace(/^﻿/, '').split(/\r?\n/).filter(l => l.trim());
+  if(!lines.length) throw new Error('Die Datei ist leer.');
+  const head = lines[0];
+  const sep = ['\t', ';', ','].map(s => [s, head.split(s).length]).sort((a, b) => b[1] - a[1])[0][0];
+  const cols = splitLine(head, sep).map(h => h.toLowerCase());
+  const iL = cols.findIndex(h => h === 'langname' || h === 'nachname' || h === 'familienname');
+  const iV = cols.findIndex(h => h === 'vorname');
+  const iK = cols.findIndex(h => h === 'klasse' || h === 'klassen');
+  if(iL < 0 || iV < 0) throw new Error('Spalten „Langname“ und „Vorname“ wurden nicht gefunden.');
+  const rows = [];
+  lines.slice(1).forEach(l => {
+    const f = splitLine(l, sep);
+    const last = (f[iL] || '').replace(/\s+/g, ' '), first = (f[iV] || '').replace(/\s+/g, ' ');
+    if(!last && !first) return;
+    rows.push({ name: (first + ' ' + last).trim(), klasse: iK >= 0 ? (f[iK] || '').trim() : '' });
+  });
+  return rows;
+}
+$('#untisBtn').onclick = () => { if(!busy) $('#untisFile').click(); };
+$('#untisFile').onchange = async e => {
+  const f = e.target.files[0]; e.target.value = ''; if(!f) return;
+  let rows;
+  try{ rows = parseUntis(decodeText(await f.arrayBuffer())); }
+  catch(err){ alert('WebUntis-Import fehlgeschlagen: ' + err.message); return; }
+  if(!rows.length){ alert('In der Datei wurden keine Schüler gefunden.'); return; }
+  const byName = {};
+  Object.entries(state.classes).forEach(([id, c]) => byName[c.name.trim().toLowerCase()] = id);
+  let added = 0, dup = 0, firstId = null; const touched = new Set();
+  rows.forEach(r => {
+    let id;
+    if(r.klasse){
+      id = byName[r.klasse.toLowerCase()];
+      if(!id){ id = uid(); state.classes[id] = { name:r.klasse, students:[], drawn:[], history:[] }; byName[r.klasse.toLowerCase()] = id; }
+    } else id = state.current;
+    const c = state.classes[id];
+    if(!firstId) firstId = id;
+    touched.add(c.name);
+    if(c.students.some(s => s.name.toLowerCase() === r.name.toLowerCase())){ dup++; return; }
+    c.students.push({ id:uid(), name:r.name.slice(0, 60), absent:false }); added++;
+  });
+  state.current = firstId; save(); refresh();
+  const names = [...touched].join(', ');
+  say(`WebUntis-Import: ${added} Schüler in ${names} geladen ✔${dup ? ` (${dup} schon vorhanden)` : ''}`);
 };
 
 // header controls

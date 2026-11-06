@@ -13,6 +13,7 @@ Ein verspielter Zufallsgenerator, um Schülerinnen und Schüler für die Stunden
 
 ## Features
 - Mehrere Klassen, Namen per Copy & Paste hinzufügen
+- **WebUntis-Import**: CSV-Schülerliste aus WebUntis (nur Langname, Vorname und Klasse werden übernommen, Klassen werden automatisch angelegt)
 - Abwesende markieren, „Keine Wiederholung, bis alle dran waren“
 - Im Browser erzeugte Chiptune-Musik und Soundeffekte
 - Daten bleiben lokal im Browser (localStorage), Backup per JSON-Export/Import
